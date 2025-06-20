@@ -66,3 +66,64 @@ FROM last_year l
 FULL OUTER JOIN current_year c
 ON l.actor = c.actor );
 
+--DROP TABLE actors_history_scd;
+
+SELECT * FROM actors WHERE actor = 'Aamir Khan';
+
+CREATE TABLE actors_history_scd (
+  actor TEXT,
+  actorid TEXT,
+  quality_class quality_class,
+  is_active BOOLEAN,
+  start_year INTEGER,
+  end_year INTEGER
+)
+
+CREATE TYPE scd_type AS (
+ quality_class quality_class,
+ is_active BOOLEAN,
+ start_year INTEGER,
+ end_year INTEGER
+)
+
+INSERT INTO actors_history_scd (
+WITH previous_scd AS (
+ SELECT actor,
+ actorid,
+ quality_class,
+ is_active,
+ LAG(quality_class, 1) OVER (PARTITION BY actor ORDER BY current_year) AS prev_quality_class,
+ LAG(is_active, 1) OVER (PARTITION BY actor ORDER BY current_year) AS prev_is_active,
+ current_year
+ FROM actors WHERE current_year <= 2020
+),
+
+with_indicators AS (
+SELECT *,
+CASE
+	WHEN quality_class <> prev_quality_class THEN 1
+	WHEN is_active <> prev_is_active THEN 1
+	ELSE 0
+END AS change_indicator
+FROM  previous_scd
+),
+
+streak_indicator AS (
+SELECT
+*,
+SUM(change_indicator) OVER (PARTITION BY actor ORDER BY current_year) AS streak_indicator
+FROM with_indicators
+)
+
+
+
+SELECT
+actor,
+actorid,
+quality_class,
+is_active,
+min(current_year) AS start_year,
+max(current_year) AS end_year
+FROM streak_indicator
+GROUP BY actor, actorid, quality_class, is_active, streak_indicator
+)
