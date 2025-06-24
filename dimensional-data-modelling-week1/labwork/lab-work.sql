@@ -1,139 +1,247 @@
- CREATE TYPE season_stats AS (
-                         season Integer,
-                         pts REAL,
-                         ast REAL,
-                         reb REAL,
-                         weight INTEGER
-                       );
- CREATE TYPE scoring_class AS
-     ENUM ('bad', 'average', 'good', 'star');
+-------------------- DAY 1 -----------------------------
 
+--select * from actor_films WHERE YEAR = 1971;
 
- CREATE TABLE players (
-     player_name TEXT,
-     height TEXT,
-     college TEXT,
-     country TEXT,
-     draft_year TEXT,
-     draft_round TEXT,
-     draft_number TEXT,
-     seasons season_stats[],
-     scoring_class scoring_class,
-     years_since_last_active INTEGER,
-     is_active BOOLEAN,
-     current_season INTEGER,
-     PRIMARY KEY (player_name, current_season)
- );
+--select max(year) from actor_films;
 
-
-
- WITH last_season AS (
-    SELECT * FROM players
-    WHERE current_season = 2021
-
-), this_season AS (
-     SELECT * FROM player_seasons
-    WHERE season = 2022
+CREATE TYPE film_stats AS (
+  film TEXT,
+  votes INTEGER,
+  rating REAL,
+  filmid TEXT
 )
-INSERT INTO players
+
+--DROP TYPE film_stats;
+
+CREATE TYPE quality_class AS
+ENUM('star', 'good', 'average', 'bad');
+
+--DROP TABLE actors;
+
+CREATE TABLE actors (
+  actor TEXT,
+  actorid TEXT,
+  films film_stats[],
+  quality_class quality_class,
+  is_active BOOLEAN,
+  current_year INTEGER,
+  PRIMARY KEY (actor, current_year)
+);
+
+--SELECT * FROM actors WHERE actor = 'Agnes Moorehead';
+
+INSERT INTO actors (
+WITH last_year AS (
+SELECT * FROM actors
+WHERE current_year = 1974),
+
+current_year AS (
 SELECT
-        COALESCE(ls.player_name, ts.player_name) as player_name,
-        COALESCE(ls.height, ts.height) as height,
-        COALESCE(ls.college, ts.college) as college,
-        COALESCE(ls.country, ts.country) as country,
-        COALESCE(ls.draft_year, ts.draft_year) as draft_year,
-        COALESCE(ls.draft_round, ts.draft_round) as draft_round,
-        COALESCE(ls.draft_number, ts.draft_number)
-            as draft_number,
-        COALESCE(ls.seasons,
-            ARRAY[]::season_stats[]
-            ) || CASE WHEN ts.season IS NOT NULL THEN
-                ARRAY[ROW(
-                ts.season,
-                ts.pts,
-                ts.ast,
-                ts.reb, ts.weight)::season_stats]
-                ELSE ARRAY[]::season_stats[] END
-            as seasons,
-         CASE
-             WHEN ts.season IS NOT NULL THEN
-                 (CASE WHEN ts.pts > 20 THEN 'star'
-                    WHEN ts.pts > 15 THEN 'good'
-                    WHEN ts.pts > 10 THEN 'average'
-                    ELSE 'bad' END)::scoring_class
-             ELSE ls.scoring_class
-         END as scoring_class,
-        CASE
-        	WHEN ts.season IS NOT NULL THEN 0
-        	ELSE ls.years_since_last_active + 1
-        END AS years_since_last_active,
-         ts.season IS NOT NULL as is_active,
-         2022 AS current_season
+actor,
+actorid,
+ARRAY_AGG(ROW(film,votes,rating,filmid)::film_stats) AS films,
+AVG(rating) AS avg_rating,
+year
+FROM actor_films
+WHERE YEAR = 1975
+GROUP BY actor, actorid, year
+)
 
-    FROM last_season ls
-    FULL OUTER JOIN this_season ts
-    ON ls.player_name = ts.player_name;
+SELECT
+COALESCE(c.actor, l.actor) AS actor,
+COALESCE(c.actorid, l.actorid) AS actorid,
+COALESCE(l.films, ARRAY[]::film_stats[]) || CASE WHEN c.films IS NOT NULL THEN
+                c.films
+                ELSE
+                    ARRAY[]::film_stats[] END AS films,
+CASE WHEN c.avg_rating IS NOT NULL THEN
+   (CASE WHEN (c.avg_rating) > 8 THEN 'star'
+   WHEN (c.avg_rating) > 7 THEN 'good'
+   WHEN (c.avg_rating) > 6 THEN 'average'
+   ELSE 'bad' END) :: quality_class
+  ELSE
+     l.quality_class
+  END AS quality_class,
+ c.year IS NOT NULL AS is_active,
+ 1975 AS current_year
+FROM last_year l
+FULL OUTER JOIN current_year c
+ON l.actor = c.actor );
 
 
+-------------------- DAY 2 -----------------------------
+--DROP TABLE actors_history_scd;
 
- -- DROP TABLE players_scd;
+--SELECT * FROM actors WHERE actor = 'Aamir Khan';
 
-    CREATE TABLE players_scd (
-   player_name TEXT,
-   scoring_class scoring_class,
-   is_active BOOLEAN,
-   start_season INTEGER,
-   end_season INTEGER,
-   current_season INTEGER,
-   PRIMARY KEY (player_name, start_season)
+CREATE TABLE actors_history_scd (
+  actor TEXT,
+  actorid TEXT,
+  quality_class quality_class,
+  is_active BOOLEAN,
+  start_year INTEGER,
+  end_year INTEGER,
+  PRIMARY KEY (actor, start_year)
+)
 
- );
+CREATE TYPE scd_type AS (
+ quality_class quality_class,
+ is_active BOOLEAN,
+ start_year INTEGER,
+ end_year INTEGER
+)
 
-
- INSERT INTO players_scd (
- WITH with_previous AS (
- SELECT player_name,
- scoring_class,
+INSERT INTO actors_history_scd (
+WITH previous_scd AS (
+ SELECT actor,
+ actorid,
+ quality_class,
  is_active,
- LAG(scoring_class, 1) OVER (PARTITION BY player_name ORDER BY current_season) AS prev_scoring_class,
- LAG(is_active, 1) OVER (PARTITION BY player_name ORDER BY current_season) AS prev_is_active,
- current_season
- FROM players
- WHERE current_season <= 2021) ,
+ LAG(quality_class, 1) OVER (PARTITION BY actor ORDER BY current_year) AS prev_quality_class,
+ LAG(is_active, 1) OVER (PARTITION BY actor ORDER BY current_year) AS prev_is_active,
+ current_year
+ FROM actors WHERE current_year <= 2020
+),
 
- with_indicators AS (
+with_indicators AS (
+SELECT *,
+CASE 
+	WHEN quality_class <> prev_quality_class THEN 1
+	WHEN is_active <> prev_is_active THEN 1
+	ELSE 0
+END AS change_indicator
+FROM  previous_scd
+),
 
- SELECT
- *,
- CASE
- 	WHEN scoring_class <> prev_scoring_class THEN 1
- 	WHEN is_active <> prev_is_active THEN 1
- 	ELSE 0
- END AS change_indicator
- FROM with_previous)
-
- --with_streak_indicator AS (
-
- SELECT *,
- SUM(change_indicator) OVER (PARTITION BY player_name ORDER BY current_season) AS streak_indicator
- FROM with_indicators
- --)
+streak_indicator AS (
+SELECT 
+*,
+SUM(change_indicator) OVER (PARTITION BY actor ORDER BY current_year) AS streak_indicator
+FROM with_indicators
+)
 
 
+
+SELECT 
+actor,
+actorid,
+quality_class,
+is_active,
+min(current_year) AS start_year,
+max(current_year) AS end_year
+FROM streak_indicator
+GROUP BY actor, actorid, quality_class, is_active, streak_indicator
+)
+
+--SELECT * FROM actors_history_scd;
+
+-------------------- DAY 3 -----------------------------
+
+CREATE TYPE vertex_type AS ENUM('player', 'team', 'game');
+
+CREATE TABLE vertices (
+ identifier TEXT,
+ type vertex_type,
+ properties JSON,
+ PRIMARY KEY (identifier, type)
+);
+
+DROP TABLE vertices;
+
+CREATE TYPE edge_type AS 
+ ENUM ('plays_against', 'shares_team', 'plays_in', 'plays_on')
+ 
+ CREATE TABLE edges (
+  subject_identifier TEXT,
+  subject_type vertex_type,
+  object_identifier TEXT,
+  object_type vertex_type,
+  edge_type edge_type,
+  properties JSON,
+  PRIMARY KEY (subject_identifier, subject_type, object_identifier, object_type, edge_type)
+ );
+ 
+
+INSERT INTO vertices ( 
 SELECT
-  player_name,
-  scoring_class,
-  is_active,
-  MIN(current_season) AS start_season,
-  MAX(current_season) AS end_season,
-  2021 AS current_season
-  FROM with_streak_indicator
-  GROUP BY player_name, streak_indicator, is_active, scoring_class
-  ORDER BY player_name
+ game_id AS identfier,
+ 'game'::vertex_type AS type,
+ json_build_object(
+   'pts_home', pts_home,
+   'pts_away', pts_away,
+   'winning_team', CASE WHEN home_team_wins = 1 THEN home_team_id ELSE visitor_team_id END
+ ) AS properties
+
+FROM games );
+
+INSERT INTO vertices (
+WITH players_agg AS (
+SELECT 
+   player_id AS identifier,
+   MAX(player_name) AS player_name,
+   count(1) AS number_of_games,
+   sum(pts) AS total_points,
+   ARRAY_AGG (DISTINCT team_id) AS teams
+FROM game_details
+GROUP BY player_id
+)
+
+SELECT identifier,
+       'player'::vertex_type AS type, 
+       json_build_object(
+         'player_name', player_name,
+         'number_of_games', number_of_games,
+         'total_points', total_points,
+         'teams', teams
+       ) AS properties
+FROM players_agg
+)
+;
+
+INSERT INTO vertices (
+WITH team_deduped AS (
+SELECT *,
+ROW_NUMBER () OVER (PARTITION BY team_id) AS row_num
+FROM teams
+ 
+)
+SELECT 
+     team_id AS identifier,
+     'team'::vertex_type AS type,
+     json_build_object(
+        'abbreviation', abbreviation,
+        'nickname', nickname,
+        'city', city,
+        'arena', arena,
+        'year_founded', yearfounded
+     )
+     FROM team_deduped WHERE row_num =1 )
+;
+
+INSERT INTO edges(
+
+WITH deduped AS ( 
+SELECT *, ROW_NUMBER () OVER (PARTITION BY player_id, game_id) AS row_num
+FROM game_details
+)
+SELECT 
+  player_id AS subject_identifier,
+  'player'::vertex_type AS subject_type,
+  game_id AS object_identfier,
+  'game'::vertex_type AS object_type,
+  'plays_in'::edge_type AS edge_type,
+  json_build_object(
+   'start_position', start_position,
+   'pts', pts,
+   'team_id', team_id,
+   'team_abbreviation', team_abbreviation
+  ) AS properties
+  
+  FROM deduped WHERE row_num = 1
   )
+  ;
 
-  SELECT * FROM players_scd;
 
-  SELECT * FROM players
-  WHERE player_name = 'Aaron Brooks'
-  ORDER BY player_name;
+SELECT TYPE, count(1)
+FROM vertices GROUP BY TYPE;
+
