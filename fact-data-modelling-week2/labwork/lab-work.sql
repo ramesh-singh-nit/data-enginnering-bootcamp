@@ -81,3 +81,79 @@ CREATE TABLE fct_game_details (
 )
 
 --SELECT * FROM fct_game_details;
+
+
+--- FACT DATA MODELLING LAB DAY 2--------
+
+INSERT INTO users_cumulated (
+WITH yesterday AS (
+select * from users_cumulated
+
+  WHERE date = DATE('2023-01-30')),
+
+
+today AS (
+select
+ CAST(user_id AS TEXT) AS user_id,
+date(CAST(event_time AS timestamp)) AS date_active
+from events
+WHERE date(CAST(event_time AS timestamp)) = DATE('2023-01-31')
+AND user_id  IS NOT null
+GROUP BY user_id, date(CAST(event_time AS timestamp)))
+
+SELECT COALESCE(y.user_id, t.user_id) AS user_id,
+CASE WHEN y.dates_active IS NULL
+  THEN ARRAY[t.date_active]
+  WHEN t.date_active IS NULL THEN y.dates_active
+  ELSE ARRAY[t.date_active] || y.dates_active
+END AS date_active,
+COALESCE(t.date_active, y.date + INTERVAL '1 day') AS date
+
+FROM today t
+FULL OUTER JOIN yesterday y
+ON t.user_id = y.user_id
+)
+
+
+
+SELECT * FROM users_cumulated WHERE date= '2023-01-31';
+
+
+WITH users AS (
+ SELECT * FROM users_cumulated
+ WHERE date = DATE('2023-01-31')
+
+),
+
+series AS (
+ SELECT * FROM generate_series(DATE('2023-01-01'), DATE('2023-01-31'), INTERVAL '1 DAY') AS series_date
+),
+
+placeholder_int AS (
+
+SELECT
+CASE WHEN dates_active @> ARRAY [date(series_date)]
+ THEN CAST(POW(2, 32 - (date - DATE(series_date))) AS bigint)
+ ELSE 0
+ END  AS placeholder_int_value,
+* FROM users_cumulated CROSS JOIN series
+)
+
+SELECT user_id,
+CAST(CAST(SUM(placeholder_int_value) AS bigint) AS bit(32)),
+bit_count(CAST(CAST(SUM(placeholder_int_value) AS bigint) AS bit(32))) > 0 AS dim_monthly_active
+
+FROM placeholder_int
+GROUP BY user_id
+
+--DROP TABLE users_cumulated;
+
+CREATE TABLE users_cumulated (
+ user_id TEXT,
+ -- The list in the past where user is active
+ dates_active DATE[],
+ -- the current date for the user
+ date DATE,
+ PRIMARY KEY (user_id, date)
+
+)
